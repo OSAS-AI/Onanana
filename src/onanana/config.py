@@ -11,8 +11,7 @@ class Settings(BaseSettings):
     cloud_ollama_base_url: str = ""
     cloud_api_key: str = ""
     keys_file_path: str = "secrets/keys.txt"
-    short_lock_file_path: str = "secrets/ollama_shorttime_keys_lock.txt"
-    long_lock_file_path: str = "secrets/ollama_longtime_keys_lock.txt"
+    lock_file_path: str = "secrets/ollama_keys_lock.txt"
     cloud_model_suffix: str = "-cloud"
 
     model_config = {"env_prefix": "WARP_", "extra": "ignore"}

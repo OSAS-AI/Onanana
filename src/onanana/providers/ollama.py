@@ -1,10 +1,11 @@
+import datetime
 import logging
 from pathlib import Path
 from typing import Any
 
 import httpx
 
-from src.onanana.keys_manager import KeysManager
+from src.onanana.keys_manager import KeysManager, LOCK_SEPARATOR
 from src.onanana.ollama.request import OllamaRequestBuilder
 
 logger = logging.getLogger(__name__)
@@ -21,8 +22,7 @@ class OllamaProvider:
         keys_manager: KeysManager,
         client: httpx.AsyncClient | None = None,
         cloud_api_key: str = "",
-        short_lock_path: str = "",
-        long_lock_path: str = "",
+        lock_path: str = "",
     ):
         self._local_base = local_base_url.rstrip("/")
         self._cloud_base = cloud_base_url.rstrip("/")
@@ -30,17 +30,30 @@ class OllamaProvider:
         self._client = client or httpx.AsyncClient(timeout=300.0)
         self._req_builder = OllamaRequestBuilder(self._client)
         self._fallback_api_key = cloud_api_key
-        self._short_lock_path = Path(short_lock_path) if short_lock_path else None
-        self._long_lock_path = Path(long_lock_path) if long_lock_path else None
+        self._lock_path = Path(lock_path) if lock_path else None
         self._timeout_count: dict[str, int] = {}
 
     def _append_to_lock(self, path: Path | None, key: str):
         if not path:
             return
         existing = path.read_text().splitlines() if path.exists() else []
-        if key not in [line.strip() for line in existing if line.strip() and not line.strip().startswith("#")]:
+        already_locked = False
+        for line in existing:
+            raw = line.strip()
+            if not raw or raw.startswith("#"):
+                continue
+            if LOCK_SEPARATOR in raw:
+                k, _ = raw.split(LOCK_SEPARATOR, 1)
+                if k == key:
+                    already_locked = True
+                    break
+            elif raw == key:
+                already_locked = True
+                break
+        if not already_locked:
+            now = datetime.datetime.now(datetime.timezone.utc).isoformat()
             with open(path, "a") as f:
-                f.write(key + "\n")
+                f.write(f"{key}{LOCK_SEPARATOR}{now}\n")
             logger.warning("Key locked -> %s", path.name)
 
     async def _send_with_retry(
@@ -59,7 +72,7 @@ class OllamaProvider:
                 if token:
                     self._timeout_count[token] = self._timeout_count.get(token, 0) + 1
                     if self._timeout_count[token] >= MAX_RETRIES:
-                        self._append_to_lock(self._short_lock_path, token)
+                        self._append_to_lock(self._lock_path, token)
                         break
         raise httpx.TimeoutException(f"Request failed after {MAX_RETRIES} timeouts")
 
@@ -101,11 +114,14 @@ class OllamaProvider:
             base, token, headers = await self._resolve_cloud_auth()
             if not token:
                 raise RuntimeError("No API key available for cloud endpoint")
-            return await self._send_with_retry(
+            resp = await self._send_with_retry(
                 path, base, json_body,
                 model_override=stripped_model, headers=headers,
                 stream=stream, token=token,
             )
+            if resp.status_code == 429 and token:
+                self._append_to_lock(self._lock_path, token)
+            return resp
 
         return await self._req_builder.send_request(
             path,
@@ -125,10 +141,13 @@ class OllamaProvider:
                 raise RuntimeError("No API key available for cloud endpoint")
             url = f"{base}/{path.lstrip('/')}"
             logger.debug("Proxying cloud GET %s -> %s", path, url)
-            return await self._send_with_retry(
+            resp = await self._send_with_retry(
                 path, base, None,
                 headers=headers, stream=False, token=token,
             )
+            if resp.status_code == 429 and token:
+                self._append_to_lock(self._lock_path, token)
+            return resp
         url = f"{self._local_base}/{path.lstrip('/')}"
         logger.debug("Proxying local GET %s -> %s", path, url)
         return await self._client.get(url)
@@ -144,11 +163,14 @@ class OllamaProvider:
             base, token, headers = await self._resolve_cloud_auth()
             if not token:
                 raise RuntimeError("No API key available for cloud endpoint")
-            return await self._send_with_retry(
+            resp = await self._send_with_retry(
                 path, base, json_body,
                 model_override=stripped_model, headers=headers,
                 stream=False, token=token,
             )
+            if resp.status_code == 429 and token:
+                self._append_to_lock(self._lock_path, token)
+            return resp
 
         return await self._req_builder.send_request(
             path,

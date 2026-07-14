@@ -11,6 +11,11 @@ Client -> :11435 -> OllamaProvider -> localhost:11434 (no auth)
 - [Package](package.md) — `src/onanana/` modules
 - [Usage](usage.md) — setup, config, examples
 
+## Prerequisites
+
+- **Local** — [Ollama](https://ollama.com) must be installed and running on the target host (default `http://localhost:11434`)
+- **Cloud** — one or more API keys saved in `secrets/keys.txt` (one per line, see [`secrets/keys.txt.example`](../secrets/keys.txt.example))
+
 ## Quick start
 
 ```bash
@@ -28,5 +33,4 @@ All `WARP_*` env vars are read from `secrets/.env` or the environment:
 | `WARP_CLOUD_API_KEY` | `""` | Fallback Bearer token |
 | `WARP_CLOUD_MODEL_SUFFIX` | `-cloud` | Suffix for cloud routing |
 | `WARP_KEYS_FILE_PATH` | `secrets/keys.txt` | API tokens file |
-| `WARP_SHORT_LOCK_FILE_PATH` | `secrets/ollama_shorttime_keys_lock.txt` | Short-term key ban file |
-| `WARP_LONG_LOCK_FILE_PATH` | `secrets/ollama_longtime_keys_lock.txt` | Long-term key ban file |
+| `WARP_LOCK_FILE_PATH` | `secrets/ollama_keys_lock.txt` | Key lock file (auto-resets every 5h) |

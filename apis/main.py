@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -16,9 +17,10 @@ from src.onanana.providers.ollama import OllamaProvider
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
 
+CLEANUP_INTERVAL = 600  # 10 minutes
+
 km = KeysManager(settings.keys_file_path, cloud_base_url=settings.cloud_ollama_base_url,
-                 short_lock_path=settings.short_lock_file_path,
-                 long_lock_path=settings.long_lock_file_path)
+                 lock_path=settings.lock_file_path)
 km.load_keys()
 client = httpx.AsyncClient(timeout=300.0)
 provider = OllamaProvider(
@@ -27,14 +29,23 @@ provider = OllamaProvider(
     keys_manager=km,
     client=client,
     cloud_api_key=settings.cloud_api_key,
-    short_lock_path=settings.short_lock_file_path,
-    long_lock_path=settings.long_lock_file_path,
+    lock_path=settings.lock_file_path,
 )
+
+
+async def cleanup_loop():
+    while True:
+        await asyncio.sleep(CLEANUP_INTERVAL)
+        removed = km.cleanup_expired_locks()
+        if removed:
+            logger.info("Auto-cleanup removed %d expired lock(s)", removed)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    task = asyncio.create_task(cleanup_loop())
     yield
+    task.cancel()
     await client.aclose()
     await km.close()
 
@@ -42,8 +53,16 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="AI Warp Tool", lifespan=lifespan)
 
 
+@app.exception_handler(RuntimeError)
+async def no_key_handler(request: Request, exc: RuntimeError):
+    if "No API key available" in str(exc):
+        return JSONResponse(status_code=429, content={"error": "No API keys available - all keys locked or missing"})
+    return JSONResponse(status_code=500, content={"error": str(exc)})
+
+
 @app.get("/api/version")
 async def version(source: str = Query("local", pattern="^(local|cloud)$")):
+    km.cleanup_expired_locks()
     resp = await provider.proxy_get("api/version", source=source)
     await resp.aread()
     return JSONResponse(content=resp.json(), status_code=resp.status_code)
@@ -51,6 +70,7 @@ async def version(source: str = Query("local", pattern="^(local|cloud)$")):
 
 @app.get("/api/tags")
 async def tags(source: str = Query("local", pattern="^(local|cloud)$")):
+    km.cleanup_expired_locks()
     resp = await provider.proxy_get("api/tags", source=source)
     await resp.aread()
     return JSONResponse(content=resp.json(), status_code=resp.status_code)
@@ -66,6 +86,8 @@ async def proxy(
     prompt: str = Query(None),
     system: str = Query(None),
 ):
+    km.cleanup_expired_locks()
+
     try:
         body = await request.json()
     except Exception:

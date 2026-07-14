@@ -29,8 +29,8 @@ def get_api_key(file_path="secrets/keys.txt"):
     # Fallback to environment variable (updated to a more logical name)
     return os.getenv("OLLAMA_API_KEY", "")
 
-API_KEY = get_api_key()
-MODEL_NAME = "gemma4:31b-cloud"
+API_KEY = "6176446c5b5149ad875cf00315117412.kSZY_bvZ-II932DUFzmRLzXo"#get_api_key()
+MODEL_NAME = "qwen3-coder:480b-cloud"#"gemma4:31b-cloud"
 
 def chat_with_ollama(prompt, system_prompt="You are a helpful assistant."):
     """

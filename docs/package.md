@@ -26,15 +26,14 @@ settings.cloud_api_key
 settings.cloud_model_suffix    # "-cloud" (defined but not wired to provider yet)
 settings.keys_file_path
 settings.local_ollama_base_url
-settings.short_lock_file_path  # secrets/ollama_shorttime_keys_lock.txt
-settings.long_lock_file_path   # secrets/ollama_longtime_keys_lock.txt
+settings.lock_file_path  # secrets/ollama_keys_lock.txt
 ```
 
 Reads from `WARP_*` env vars. Call `load_dotenv("secrets/.env")` at import to load from file.
 
 ### `keys_manager.py`
 
-Loads Bearer tokens from `secrets/keys.txt` and provides round-robin selection with optional health-checking. Filters out locked keys (from lock files).
+Loads Bearer tokens from `secrets/keys.txt` and provides round-robin selection with optional health-checking. Filters out locked keys (from `secrets/ollama_keys_lock.txt`). Locked entries older than 5 hours are auto-purged on read. Exposes `cleanup_expired_locks()` to restore unlocked keys back to the healthy pool.
 
 ```python
 km = KeysManager("secrets/keys.txt", cloud_base_url="https://...")
@@ -46,6 +45,7 @@ key = await km.get_next_healthy_key()  # or None
 
 Core proxy logic. Resolves routing, injects auth headers, forwards requests. Features:
 - Retry (3 attempts) on timeout with auto-lock of failing keys
+- Auto-lock on `429` responses
 - Cloud suffix stripping (`-cloud`) and detection
 
 ```python

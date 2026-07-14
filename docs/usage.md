@@ -1,5 +1,10 @@
 # Usage
 
+## Prerequisites
+
+- **Local** — [Ollama](https://ollama.com) must be installed and running on the target host (default `http://localhost:11434`). Start it with `ollama serve`.
+- **Cloud** — one or more API keys saved in `secrets/keys.txt` (one per line). See [`secrets/keys.txt.example`](../secrets/keys.txt.example) for the format. Comments and blank lines are ignored.
+
 ## Setup
 
 ```bash
@@ -44,7 +49,17 @@ sk-def456...
 sk-ghi789...
 ```
 
-Tokens are used in round-robin order with automatic health checking. Tokens that time out 3 times are auto-locked into `secrets/ollama_shorttime_keys_lock.txt`. If `keys.txt` is empty or missing, the fallback `WARP_CLOUD_API_KEY` env var is used.
+Tokens are used in round-robin order with automatic health checking. Tokens that get a `429` (rate limited) or time out 3 consecutive times are auto-locked into `secrets/ollama_keys_lock.txt` so they won't be reused.
+
+Locked keys are automatically unlocked in **3 ways**:
+
+1. **Background cleanup** — a background task runs every **10 minutes** and removes expired entries from the lock file.
+2. **On each request** — every endpoint handler checks the lock file before processing, so expired keys become available immediately.
+3. **Lock file expiry** — each locked entry has a 5-hour timestamp. Entries older than **5 hours** are automatically purged when the lock file is read.
+
+When all keys are locked, the proxy returns `429` instead of `500`.
+
+If `keys.txt` is empty or missing, the fallback `WARP_CLOUD_API_KEY` env var is used.
 
 ### Cloud model suffix
 
@@ -184,6 +199,7 @@ See [`examples/ai_warp_tool_api.ipynb`](../examples/ai_warp_tool_api.ipynb) for 
 | Cloud endpoint, configured | `200` |
 | Cloud endpoint, URL missing | `503` — "Cloud base URL not configured" |
 | Cloud endpoint, key missing | `503` — "No API key available" |
+| All cloud keys locked | `429` — "No API keys available - all keys locked or missing" |
 | Invalid `?source=` value | `422` |
 
 ## Shutdown
