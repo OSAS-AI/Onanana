@@ -64,11 +64,31 @@ class ChatResponse(BaseModel):
 class EmbedRequest(BaseModel):
     model: str
     input: str | list[str]
+    truncate: bool | None = None
+    options: dict[str, Any] | None = None
+    keep_alive: str | float | None = None
+    dimensions: int | None = None
 
 
 class EmbedResponse(BaseModel):
     model: str
     embeddings: list[list[float]] = Field(default_factory=list)
+    total_duration: int | None = None
+    load_duration: int | None = None
+    prompt_eval_count: int | None = None
+
+
+class EmbeddingsRequest(BaseModel):
+    """Legacy `/api/embeddings` request (superseded by `/api/embed`)."""
+
+    model: str
+    prompt: str = ""
+    options: dict[str, Any] | None = None
+    keep_alive: str | float | None = None
+
+
+class EmbeddingsResponse(BaseModel):
+    embedding: list[float] = Field(default_factory=list)
 
 
 class PullRequest(BaseModel):
@@ -94,6 +114,7 @@ class CreateRequest(BaseModel):
 
 class ShowRequest(BaseModel):
     model: str
+    verbose: bool | None = None
 
 
 class CopyRequest(BaseModel):
@@ -113,8 +134,23 @@ class ModelInfo(BaseModel):
     details: dict[str, Any] = Field(default_factory=dict)
 
 
+class RunningModel(BaseModel):
+    name: str = ""
+    model: str = ""
+    size: int = 0
+    digest: str = ""
+    details: dict[str, Any] = Field(default_factory=dict)
+    expires_at: str = ""
+    size_vram: int = 0
+    context_length: int | None = None
+
+
 class TagsResponse(BaseModel):
     models: list[ModelInfo] = Field(default_factory=list)
+
+
+class PsResponse(BaseModel):
+    models: list[RunningModel] = Field(default_factory=list)
 
 
 class VersionResponse(BaseModel):

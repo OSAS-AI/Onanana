@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 
 import httpx
 import uvicorn
-from fastapi import FastAPI, Query, Request
+from fastapi import FastAPI, Query, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 import sys
 from pathlib import Path
@@ -60,20 +60,55 @@ async def no_key_handler(request: Request, exc: RuntimeError):
     return JSONResponse(status_code=500, content={"error": str(exc)})
 
 
+async def _json_or_empty(resp: httpx.Response) -> Response:
+    await resp.aread()
+    if not resp.content:
+        return Response(status_code=resp.status_code)
+    try:
+        return JSONResponse(content=resp.json(), status_code=resp.status_code)
+    except ValueError:
+        return Response(content=resp.content, status_code=resp.status_code, media_type=resp.headers.get("content-type"))
+
+
 @app.get("/api/version")
 async def version(source: str = Query("local", pattern="^(local|cloud)$")):
     km.cleanup_expired_locks()
     resp = await provider.proxy_get("api/version", source=source)
-    await resp.aread()
-    return JSONResponse(content=resp.json(), status_code=resp.status_code)
+    return await _json_or_empty(resp)
 
 
 @app.get("/api/tags")
 async def tags(source: str = Query("local", pattern="^(local|cloud)$")):
     km.cleanup_expired_locks()
     resp = await provider.proxy_get("api/tags", source=source)
+    return await _json_or_empty(resp)
+
+
+@app.get("/api/ps")
+async def ps(source: str = Query("local", pattern="^(local|cloud)$")):
+    km.cleanup_expired_locks()
+    resp = await provider.proxy_get("api/ps", source=source)
+    return await _json_or_empty(resp)
+
+
+@app.head("/api/blobs/{digest}")
+async def blob_exists(digest: str, source: str = Query("local", pattern="^(local|cloud)$")):
+    km.cleanup_expired_locks()
+    resp = await provider.proxy_head(f"api/blobs/{digest}", source=source)
     await resp.aread()
-    return JSONResponse(content=resp.json(), status_code=resp.status_code)
+    return Response(status_code=resp.status_code)
+
+
+@app.post("/api/blobs/{digest}")
+async def create_blob(
+    digest: str,
+    request: Request,
+    source: str = Query("local", pattern="^(local|cloud)$"),
+):
+    km.cleanup_expired_locks()
+    content = await request.body()
+    resp = await provider.proxy_raw(f"api/blobs/{digest}", content, method="POST", source=source)
+    return await _json_or_empty(resp)
 
 
 @app.post("/api/{rest:path}")
@@ -114,8 +149,7 @@ async def proxy(
 
     if is_stream:
         return StreamingResponse(resp.aiter_bytes(), media_type="application/x-ndjson")
-    await resp.aread()
-    return JSONResponse(content=resp.json(), status_code=resp.status_code)
+    return await _json_or_empty(resp)
 
 
 if __name__ == "__main__":

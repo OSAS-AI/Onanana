@@ -45,7 +45,16 @@ r = requests.get("http://localhost:11435/api/tags")
 r = requests.get("http://localhost:11435/api/tags?source=cloud")
 ```
 
-### `POST /api/{chat,generate,embeddings,create,pull,push,show,copy}`
+### `GET /api/ps`
+
+List models currently loaded into memory.
+
+```python
+r = requests.get("http://localhost:11435/api/ps")
+r = requests.get("http://localhost:11435/api/ps?source=cloud")
+```
+
+### `POST /api/{chat,generate,embed,embeddings,create,pull,push,show,copy}`
 
 ```python
 import requests
@@ -82,7 +91,38 @@ r = requests.post("http://localhost:11435/api/generate", json={
 })
 ```
 
+#### Embeddings
+
+Prefer `/api/embed` (`input`). Legacy `/api/embeddings` (`prompt`) is still forwarded.
+
+```python
+r = requests.post("http://localhost:11435/api/embed", json={
+    "model": "embeddinggemma",
+    "input": "hello world",
+})
+
+r = requests.post("http://localhost:11435/api/embeddings", json={
+    "model": "all-minilm",
+    "prompt": "hello world",
+})
+```
+
 Streaming responses pass through transparently (`GET` endpoints do not support streaming).
+
+### `HEAD /api/blobs/{digest}` / `POST /api/blobs/{digest}`
+
+Check whether a blob exists, or upload a raw blob body (used when creating models).
+
+```python
+digest = "sha256:29fdb92e57cf0827ded04ae6461b5931d01fa595843f55d36f5b275a52087dd2"
+
+r = requests.head(f"http://localhost:11435/api/blobs/{digest}")
+# 200 if present, 404 if missing
+
+with open("model.bin", "rb") as f:
+    r = requests.post(f"http://localhost:11435/api/blobs/{digest}", data=f)
+# 201 Created on success
+```
 
 ### `DELETE /api/delete`
 

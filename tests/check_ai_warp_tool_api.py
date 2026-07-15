@@ -65,6 +65,55 @@ class TestTagsEndpoint:
         assert resp.status_code == 200
 
 
+class TestPsEndpoint:
+    def test_list_ps_local(self, test_app):
+        resp = test_app.get("/api/ps?source=local")
+        assert resp.status_code == 200
+
+    def test_list_ps_cloud(self, test_app):
+        resp = test_app.get("/api/ps?source=cloud")
+        assert resp.status_code == 200
+
+    def test_list_ps_default_local(self, test_app):
+        resp = test_app.get("/api/ps")
+        assert resp.status_code == 200
+
+
+class TestEmbedEndpoint:
+    def test_embed_local(self, test_app):
+        resp = test_app.post("/api/embed", json={
+            "model": "embeddinggemma",
+            "input": "hello",
+        })
+        assert resp.status_code == 200
+
+    def test_embeddings_legacy_local(self, test_app):
+        resp = test_app.post("/api/embeddings", json={
+            "model": "all-minilm",
+            "prompt": "hello",
+        })
+        assert resp.status_code == 200
+
+    def test_embed_cloud_via_source(self, test_app):
+        resp = test_app.post("/api/embed?source=cloud", json={
+            "model": "embeddinggemma",
+            "input": ["hello", "world"],
+        })
+        assert resp.status_code == 200
+
+
+class TestBlobsEndpoint:
+    def test_blob_head_local(self, test_app):
+        digest = "sha256:29fdb92e57cf0827ded04ae6461b5931d01fa595843f55d36f5b275a52087dd2"
+        resp = test_app.head(f"/api/blobs/{digest}?source=local")
+        assert resp.status_code == 200
+
+    def test_blob_create_local(self, test_app):
+        digest = "sha256:29fdb92e57cf0827ded04ae6461b5931d01fa595843f55d36f5b275a52087dd2"
+        resp = test_app.post(f"/api/blobs/{digest}?source=local", content=b"blob-bytes")
+        assert resp.status_code == 200
+
+
 class TestChatEndpoint:
     def test_chat_local_model(self, test_app):
         resp = test_app.post("/api/chat", json={
@@ -249,3 +298,70 @@ async def test_proxy_request_with_source_override():
         body = {"model": "gemma4:31b-cloud", "messages": [], "stream": False}
         resp = await prov.proxy_request("api/chat", body, stream=False, source="local")
         assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_proxy_head_local():
+    transport = httpx.MockTransport(lambda r: httpx.Response(200))
+    async with httpx.AsyncClient(transport=transport) as client:
+        km = KeysManager("secrets/keys.txt")
+        km._keys = []
+        km._healthy_keys = []
+        prov = OllamaProvider(
+            local_base_url="http://localhost:11434",
+            cloud_base_url="",
+            keys_manager=km,
+            client=client,
+        )
+        resp = await prov.proxy_head("api/blobs/sha256:abc", source="local")
+        assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_proxy_raw_local():
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["method"] = request.method
+        seen["content"] = request.content
+        return httpx.Response(201)
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport) as client:
+        km = KeysManager("secrets/keys.txt")
+        km._keys = []
+        km._healthy_keys = []
+        prov = OllamaProvider(
+            local_base_url="http://localhost:11434",
+            cloud_base_url="",
+            keys_manager=km,
+            client=client,
+        )
+        resp = await prov.proxy_raw("api/blobs/sha256:abc", b"payload", source="local")
+        assert resp.status_code == 201
+        assert seen["method"] == "POST"
+        assert seen["content"] == b"payload"
+
+
+@pytest.mark.asyncio
+async def test_proxy_get_cloud_uses_get_method():
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["method"] = request.method
+        return httpx.Response(200, json={"models": []})
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport) as client:
+        km = KeysManager("secrets/keys.txt", cloud_base_url="")
+        km._keys = ["sk-test"]
+        km._healthy_keys = ["sk-test"]
+        prov = OllamaProvider(
+            local_base_url="http://localhost:11434",
+            cloud_base_url="https://cloud.example.com",
+            keys_manager=km,
+            client=client,
+        )
+        resp = await prov.proxy_get("api/ps", source="cloud")
+        assert resp.status_code == 200
+        assert seen["method"] == "GET"

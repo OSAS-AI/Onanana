@@ -57,15 +57,29 @@ class OllamaProvider:
             logger.warning("Key locked -> %s", path.name)
 
     async def _send_with_retry(
-        self, path: str, base: str, body: dict[str, Any] | None, *,
-        model_override: str | None = None, headers: dict[str, str] | None = None,
-        stream: bool = True, token: str = "",
+        self,
+        path: str,
+        base: str,
+        body: dict[str, Any] | None,
+        *,
+        method: str | None = None,
+        model_override: str | None = None,
+        headers: dict[str, str] | None = None,
+        content: bytes | None = None,
+        stream: bool = True,
+        token: str = "",
     ) -> httpx.Response:
         for attempt in range(1, MAX_RETRIES + 1):
             try:
                 return await self._req_builder.send_request(
-                    path, base, body,
-                    model_override=model_override, headers=headers, stream=stream,
+                    path,
+                    base,
+                    body,
+                    method=method,
+                    model_override=model_override,
+                    headers=headers,
+                    content=content,
+                    stream=stream,
                 )
             except httpx.TimeoutException:
                 logger.warning("Timeout attempt %d/%d for key %s...", attempt, MAX_RETRIES, token[:16])
@@ -115,9 +129,14 @@ class OllamaProvider:
             if not token:
                 raise RuntimeError("No API key available for cloud endpoint")
             resp = await self._send_with_retry(
-                path, base, json_body,
-                model_override=stripped_model, headers=headers,
-                stream=stream, token=token,
+                path,
+                base,
+                json_body,
+                method="POST",
+                model_override=stripped_model,
+                headers=headers,
+                stream=stream,
+                token=token,
             )
             if resp.status_code == 429 and token:
                 self._append_to_lock(self._lock_path, token)
@@ -127,6 +146,7 @@ class OllamaProvider:
             path,
             self._local_base,
             json_body,
+            method="POST",
             model_override=None,
             stream=stream,
         )
@@ -142,8 +162,13 @@ class OllamaProvider:
             url = f"{base}/{path.lstrip('/')}"
             logger.debug("Proxying cloud GET %s -> %s", path, url)
             resp = await self._send_with_retry(
-                path, base, None,
-                headers=headers, stream=False, token=token,
+                path,
+                base,
+                None,
+                method="GET",
+                headers=headers,
+                stream=False,
+                token=token,
             )
             if resp.status_code == 429 and token:
                 self._append_to_lock(self._lock_path, token)
@@ -151,6 +176,64 @@ class OllamaProvider:
         url = f"{self._local_base}/{path.lstrip('/')}"
         logger.debug("Proxying local GET %s -> %s", path, url)
         return await self._client.get(url)
+
+    async def proxy_head(self, path: str, *, source: str = "local") -> httpx.Response:
+        if source == "cloud":
+            base, token, headers = await self._resolve_cloud_auth()
+            if not token:
+                raise RuntimeError("No API key available for cloud endpoint")
+            logger.debug("Proxying cloud HEAD %s", path)
+            resp = await self._send_with_retry(
+                path,
+                base,
+                None,
+                method="HEAD",
+                headers=headers,
+                stream=False,
+                token=token,
+            )
+            if resp.status_code == 429 and token:
+                self._append_to_lock(self._lock_path, token)
+            return resp
+        url = f"{self._local_base}/{path.lstrip('/')}"
+        logger.debug("Proxying local HEAD %s -> %s", path, url)
+        return await self._client.head(url)
+
+    async def proxy_raw(
+        self,
+        path: str,
+        content: bytes,
+        *,
+        method: str = "POST",
+        source: str = "local",
+    ) -> httpx.Response:
+        if source == "cloud":
+            base, token, headers = await self._resolve_cloud_auth()
+            if not token:
+                raise RuntimeError("No API key available for cloud endpoint")
+            logger.debug("Proxying cloud %s %s (raw body %d bytes)", method, path, len(content))
+            resp = await self._send_with_retry(
+                path,
+                base,
+                None,
+                method=method,
+                headers=headers,
+                content=content,
+                stream=False,
+                token=token,
+            )
+            if resp.status_code == 429 and token:
+                self._append_to_lock(self._lock_path, token)
+            return resp
+        logger.debug("Proxying local %s %s (raw body %d bytes)", method, path, len(content))
+        return await self._req_builder.send_request(
+            path,
+            self._local_base,
+            None,
+            method=method,
+            content=content,
+            stream=False,
+        )
 
     async def proxy_delete(
         self, path: str, json_body: dict[str, Any] | None, *, source: str | None = None
@@ -164,9 +247,14 @@ class OllamaProvider:
             if not token:
                 raise RuntimeError("No API key available for cloud endpoint")
             resp = await self._send_with_retry(
-                path, base, json_body,
-                model_override=stripped_model, headers=headers,
-                stream=False, token=token,
+                path,
+                base,
+                json_body,
+                method="DELETE",
+                model_override=stripped_model,
+                headers=headers,
+                stream=False,
+                token=token,
             )
             if resp.status_code == 429 and token:
                 self._append_to_lock(self._lock_path, token)
@@ -176,6 +264,7 @@ class OllamaProvider:
             path,
             self._local_base,
             json_body,
+            method="DELETE",
             model_override=None,
             stream=False,
         )
