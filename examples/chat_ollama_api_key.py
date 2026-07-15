@@ -11,7 +11,7 @@ load_dotenv("secrets/.env")
 # ==========================================
 # Set these via environment variables for security, or load from file for testing
 
-OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "https://api.ollama.com") # Change to your cloud endpoint
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "https://ollama.com") # Change to your cloud endpoint
 
 def get_api_key(file_path="secrets/keys.txt"):
     """

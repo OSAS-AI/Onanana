@@ -6,6 +6,8 @@ from pathlib import Path
 import sys
 import httpx
 
+from src.onanana.config import normalize_cloud_base_url
+
 logger = logging.getLogger(__name__)
 
 ROOT_DIR = Path(__file__).parents[2]
@@ -19,13 +21,13 @@ class KeysManager:
                  lock_path: str = ""):
         self._file_path = Path(file_path)
         self._lock_path = Path(lock_path) if lock_path else None
-        self._cloud_base = cloud_base_url.rstrip("/")
+        self._cloud_base = normalize_cloud_base_url(cloud_base_url)
         self._keys: list[str] = []
         self._locked_keys: set[str] = set()
         self._index: int = 0
         self._lock = asyncio.Lock()
         # Increased timeout slightly to accommodate chat API response time
-        self._client = httpx.AsyncClient(timeout=15.0)
+        self._client = httpx.AsyncClient(timeout=15.0, follow_redirects=True)
         self._healthy_keys: list[str] = []
 
     def _load_locked_keys(self) -> set[str]:

@@ -55,7 +55,7 @@ When all keys are locked, the proxy returns `429` instead of `500`.
 | `WARP_HOST` | `0.0.0.0` | Bind address |
 | `WARP_PORT` | `11435` | Listen port |
 | `WARP_LOCAL_OLLAMA_BASE_URL` | `http://localhost:11434` | Local Ollama |
-| `WARP_CLOUD_OLLAMA_BASE_URL` | `""` | Cloud API endpoint |
+| `WARP_CLOUD_OLLAMA_BASE_URL` | `""` | Cloud API endpoint — use `https://ollama.com` (not `api.ollama.com`; `/v1` 301s there) |
 | `WARP_CLOUD_API_KEY` | `""` | Fallback Bearer token |
 | `WARP_KEYS_FILE_PATH` | `secrets/keys.txt` | API tokens file |
 | `WARP_LOCK_FILE_PATH` | `secrets/ollama_keys_lock.txt` | Key lock file (auto-resets every 5h) |

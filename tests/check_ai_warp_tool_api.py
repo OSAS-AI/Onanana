@@ -264,6 +264,34 @@ class TestSuffixConfig:
         assert OllamaProvider.strip_cloud_suffix("gemma4:26b") == "gemma4:26b"
 
 
+class TestCloudUrlNormalize:
+    def test_api_ollama_com_to_ollama_com(self):
+        from src.onanana.config import normalize_cloud_base_url
+
+        assert normalize_cloud_base_url("https://api.ollama.com") == "https://ollama.com"
+        assert normalize_cloud_base_url("https://api.ollama.com/") == "https://ollama.com"
+        assert normalize_cloud_base_url("http://api.ollama.com") == "https://ollama.com"
+
+    def test_ollama_com_https_upgraded(self):
+        from src.onanana.config import normalize_cloud_base_url
+
+        assert normalize_cloud_base_url("http://ollama.com") == "https://ollama.com"
+        assert normalize_cloud_base_url("https://ollama.com") == "https://ollama.com"
+
+    def test_provider_uses_normalized_cloud_base(self):
+        km = KeysManager("secrets/keys.txt")
+        km._keys = []
+        km._healthy_keys = []
+        prov = OllamaProvider(
+            local_base_url="http://localhost:11434",
+            cloud_base_url="https://api.ollama.com",
+            keys_manager=km,
+            cloud_api_key="sk",
+        )
+        assert prov._cloud_base == "https://ollama.com"
+
+
+
 @pytest.mark.asyncio
 async def test_proxy_get_local():
     transport = httpx.MockTransport(lambda r: httpx.Response(200, json={"models": []}))

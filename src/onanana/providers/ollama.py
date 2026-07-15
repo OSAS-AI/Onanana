@@ -7,6 +7,7 @@ import httpx
 
 from src.onanana.keys_manager import KeysManager, LOCK_SEPARATOR
 from src.onanana.ollama.request import OllamaRequestBuilder
+from src.onanana.config import normalize_cloud_base_url
 
 logger = logging.getLogger(__name__)
 
@@ -25,9 +26,9 @@ class OllamaProvider:
         lock_path: str = "",
     ):
         self._local_base = local_base_url.rstrip("/")
-        self._cloud_base = cloud_base_url.rstrip("/")
+        self._cloud_base = normalize_cloud_base_url(cloud_base_url)
         self._keys_manager = keys_manager
-        self._client = client or httpx.AsyncClient(timeout=300.0)
+        self._client = client or httpx.AsyncClient(timeout=300.0, follow_redirects=True)
         self._req_builder = OllamaRequestBuilder(self._client)
         self._fallback_api_key = cloud_api_key
         self._lock_path = Path(lock_path) if lock_path else None

@@ -9,7 +9,7 @@ All endpoints match the [Ollama API](https://github.com/ollama/ollama/blob/main/
 | Backend | Base URL | Auth |
 |---|---|---|
 | Local | `http://localhost:11434` | None |
-| Cloud | `WARP_CLOUD_OLLAMA_BASE_URL` | `Authorization: Bearer <token>` |
+| Cloud | `https://ollama.com` (`WARP_CLOUD_OLLAMA_BASE_URL`) | `Authorization: Bearer <token>` |
 
 ### Rules
 

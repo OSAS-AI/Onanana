@@ -22,7 +22,7 @@ CLEANUP_INTERVAL = 600  # 10 minutes
 km = KeysManager(settings.keys_file_path, cloud_base_url=settings.cloud_ollama_base_url,
                  lock_path=settings.lock_file_path)
 km.load_keys()
-client = httpx.AsyncClient(timeout=300.0)
+client = httpx.AsyncClient(timeout=300.0, follow_redirects=True)
 provider = OllamaProvider(
     local_base_url=settings.local_ollama_base_url,
     cloud_base_url=settings.cloud_ollama_base_url,
