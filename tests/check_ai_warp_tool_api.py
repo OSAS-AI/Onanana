@@ -114,6 +114,60 @@ class TestBlobsEndpoint:
         assert resp.status_code == 200
 
 
+class TestOpenAICompatEndpoint:
+    def test_chat_completions_local(self, test_app):
+        resp = test_app.post("/v1/chat/completions", json={
+            "model": "gemma4:26b",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": False,
+        })
+        assert resp.status_code == 200
+
+    def test_chat_completions_cloud_suffix(self, test_app):
+        resp = test_app.post("/v1/chat/completions", json={
+            "model": "gemma4:31b-cloud",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": False,
+        })
+        assert resp.status_code == 200
+
+    def test_chat_completions_stream(self, test_app):
+        resp = test_app.post("/v1/chat/completions", json={
+            "model": "gemma4:26b",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": True,
+        })
+        assert resp.status_code == 200
+        assert "text/event-stream" in resp.headers["content-type"]
+
+    def test_completions_local(self, test_app):
+        resp = test_app.post("/v1/completions", json={
+            "model": "gemma4:26b",
+            "prompt": "Once upon a time",
+            "stream": False,
+        })
+        assert resp.status_code == 200
+
+    def test_embeddings_local(self, test_app):
+        resp = test_app.post("/v1/embeddings", json={
+            "model": "embeddinggemma",
+            "input": "hello",
+        })
+        assert resp.status_code == 200
+
+    def test_list_models_local(self, test_app):
+        resp = test_app.get("/v1/models")
+        assert resp.status_code == 200
+
+    def test_list_models_cloud(self, test_app):
+        resp = test_app.get("/v1/models?source=cloud")
+        assert resp.status_code == 200
+
+    def test_get_model_local(self, test_app):
+        resp = test_app.get("/v1/models/gemma4:26b")
+        assert resp.status_code == 200
+
+
 class TestChatEndpoint:
     def test_chat_local_model(self, test_app):
         resp = test_app.post("/api/chat", json={

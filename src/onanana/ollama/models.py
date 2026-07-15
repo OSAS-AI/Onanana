@@ -159,3 +159,55 @@ class VersionResponse(BaseModel):
 
 class OllamaError(BaseModel):
     error: str
+
+
+# --- OpenAI-compatible (/v1) schemas ---
+
+
+class OpenAIChatMessage(BaseModel):
+    role: str
+    content: str | list[dict[str, Any]] | None = None
+    name: str | None = None
+    tool_calls: list[dict[str, Any]] | None = None
+    tool_call_id: str | None = None
+
+
+class OpenAIChatCompletionRequest(BaseModel):
+    model: str
+    messages: list[OpenAIChatMessage] = Field(default_factory=list)
+    stream: bool = False
+    temperature: float | None = None
+    top_p: float | None = None
+    max_tokens: int | None = None
+    stop: str | list[str] | None = None
+    frequency_penalty: float | None = None
+    presence_penalty: float | None = None
+    tools: list[dict[str, Any]] | None = None
+    tool_choice: str | dict[str, Any] | None = None
+    response_format: dict[str, Any] | None = None
+    seed: int | None = None
+    user: str | None = None
+
+
+class OpenAICompletionRequest(BaseModel):
+    model: str
+    prompt: str | list[str] = ""
+    stream: bool = False
+    temperature: float | None = None
+    top_p: float | None = None
+    max_tokens: int | None = None
+    stop: str | list[str] | None = None
+    suffix: str | None = None
+    echo: bool | None = None
+    frequency_penalty: float | None = None
+    presence_penalty: float | None = None
+    seed: int | None = None
+    user: str | None = None
+
+
+class OpenAIEmbeddingRequest(BaseModel):
+    model: str
+    input: str | list[str] | list[int] | list[list[int]]
+    encoding_format: str | None = None
+    dimensions: int | None = None
+    user: str | None = None

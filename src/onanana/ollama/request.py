@@ -14,6 +14,9 @@ from src.onanana.ollama.models import (
     EmbeddingsRequest,
     EmbedRequest,
     GenerateRequest,
+    OpenAIChatCompletionRequest,
+    OpenAICompletionRequest,
+    OpenAIEmbeddingRequest,
     PullRequest,
     PushRequest,
     ShowRequest,
@@ -35,6 +38,14 @@ ENDPOINTS = {
     "tags": {"method": "GET", "model": None},
     "version": {"method": "GET", "model": None},
     "ps": {"method": "GET", "model": None},
+}
+
+# OpenAI-compatible paths under /v1 (proxied to Ollama's /v1 API).
+V1_ENDPOINTS = {
+    "chat/completions": {"method": "POST", "model": OpenAIChatCompletionRequest},
+    "completions": {"method": "POST", "model": OpenAICompletionRequest},
+    "embeddings": {"method": "POST", "model": OpenAIEmbeddingRequest},
+    "models": {"method": "GET", "model": None},
 }
 
 
@@ -104,6 +115,13 @@ class OllamaRequestBuilder:
         for name, info in ENDPOINTS.items():
             if api_path.endswith(f"/api/{name}") or api_path == f"api/{name}":
                 return info["method"]
+        for name, info in V1_ENDPOINTS.items():
+            if api_path.endswith(f"/v1/{name}") or api_path == f"v1/{name}":
+                return info["method"]
+            if name == "models" and (
+                api_path.startswith("v1/models/") or "/v1/models/" in f"/{api_path}"
+            ):
+                return "GET"
         if "/api/blobs/" in f"/{api_path}" or api_path.startswith("api/blobs/"):
             return "POST"
         return "POST"

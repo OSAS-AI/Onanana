@@ -111,6 +111,34 @@ async def create_blob(
     return await _json_or_empty(resp)
 
 
+@app.post("/v1/{rest:path}")
+@app.get("/v1/{rest:path}")
+async def openai_proxy(
+    request: Request,
+    rest: str,
+    source: str = Query(None, pattern="^(local|cloud)$"),
+):
+    """Proxy OpenAI-compatible endpoints to the backend Ollama /v1 API."""
+    km.cleanup_expired_locks()
+
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    method = request.method
+    is_stream = bool(body.get("stream", False)) if method == "POST" else False
+
+    if method == "GET":
+        resp = await provider.proxy_get(f"v1/{rest}", source=source or "local")
+        return await _json_or_empty(resp)
+
+    resp = await provider.proxy_request(f"v1/{rest}", body, stream=is_stream, source=source)
+    if is_stream:
+        return StreamingResponse(resp.aiter_bytes(), media_type="text/event-stream")
+    return await _json_or_empty(resp)
+
+
 @app.post("/api/{rest:path}")
 @app.get("/api/{rest:path}")
 @app.delete("/api/{rest:path}")

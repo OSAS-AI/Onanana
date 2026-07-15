@@ -18,6 +18,10 @@ from src.onanana.ollama.models import (
     RunningModel,
     VersionResponse,
     OllamaError,
+    OpenAIChatMessage,
+    OpenAIChatCompletionRequest,
+    OpenAICompletionRequest,
+    OpenAIEmbeddingRequest,
 )
 from src.onanana.ollama.request import OllamaRequestBuilder
 
@@ -41,5 +45,9 @@ __all__ = [
     "RunningModel",
     "VersionResponse",
     "OllamaError",
+    "OpenAIChatMessage",
+    "OpenAIChatCompletionRequest",
+    "OpenAICompletionRequest",
+    "OpenAIEmbeddingRequest",
     "OllamaRequestBuilder",
 ]

@@ -130,6 +130,70 @@ with open("model.bin", "rb") as f:
 r = requests.delete("http://localhost:11435/api/delete", json={"model": "gemma4:26b"})
 ```
 
+## OpenAI compatibility (`/v1`)
+
+Proxied to the backend Ollama OpenAI-compatible API. Same local/cloud routing rules apply (`-cloud` suffix or `?source=`).
+
+Base for OpenAI SDKs: `http://localhost:11435/v1`
+
+| Endpoint | Method |
+|---|---|
+| `/v1/chat/completions` | POST |
+| `/v1/completions` | POST |
+| `/v1/embeddings` | POST |
+| `/v1/models` | GET |
+| `/v1/models/{model}` | GET |
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:11435/v1",
+    api_key="ollama",  # required by SDK, ignored locally
+)
+
+# Chat
+r = client.chat.completions.create(
+    model="gemma4:26b",
+    messages=[{"role": "user", "content": "hi"}],
+)
+
+# Cloud via -cloud suffix
+r = client.chat.completions.create(
+    model="gemma4:31b-cloud",
+    messages=[{"role": "user", "content": "hi"}],
+)
+
+# Completions
+r = client.completions.create(model="gemma4:26b", prompt="Once upon a time")
+
+# Embeddings
+r = client.embeddings.create(model="embeddinggemma", input="hello world")
+
+# List models
+r = client.models.list()
+```
+
+Or with `requests`:
+
+```python
+r = requests.post("http://localhost:11435/v1/chat/completions", json={
+    "model": "gemma4:26b",
+    "messages": [{"role": "user", "content": "hi"}],
+    "stream": False,
+})
+
+# Streaming uses SSE (text/event-stream)
+r = requests.post("http://localhost:11435/v1/chat/completions", json={
+    "model": "gemma4:26b",
+    "messages": [{"role": "user", "content": "hi"}],
+    "stream": True,
+}, stream=True)
+
+r = requests.get("http://localhost:11435/v1/models")
+r = requests.get("http://localhost:11435/v1/models?source=cloud")
+```
+
 ## Errors
 
 | Status | Meaning |
