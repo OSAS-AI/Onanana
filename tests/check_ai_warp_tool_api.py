@@ -35,7 +35,7 @@ def test_app(mock_client, monkeypatch):
     monkeypatch.setattr("apis.main.km", mock_km)
     monkeypatch.setattr("apis.main.provider", mock_prov)
 
-    from apis.main import app
+    from apis.fast_api.main import app
     with TestClient(app) as client:
         yield client
 
