@@ -1,0 +1,10 @@
+ollama_cloud_errors:
+  429:
+    description: "Too Many Requests - rate limit exceeded, key will be locked"
+    action: lock_key
+  403:
+    description: "Forbidden - access denied, key may be invalid or revoked"
+    action: lock_key
+  524:
+    description: "A timeout occurred - origin server did not respond in time"
+    action: lock_key
