@@ -260,13 +260,40 @@ async def openai_proxy(
         if use_cloud:
             return await _cloud_chat_openai(body, stream=is_stream, model=model)
 
-        # Local Ollama may lack /v1 — fall back to /api/chat.
+        # Local Ollama may lack /v1 — fall back to /api/chat, then cloud on 404 (model missing).
+        logger.info("Local OpenAI chat model=%r", model)
         resp = await provider.proxy_request("v1/chat/completions", body, stream=is_stream, source="local")
         if resp.status_code in {404, 405}:
-            logger.warning("Local /v1/chat/completions -> %s — falling back to /api/chat", resp.status_code)
-            await resp.aread()
+            logger.warning(
+                "Local /v1/chat/completions -> %s model=%r — falling back to /api/chat",
+                resp.status_code,
+                model,
+            )
+            try:
+                await resp.aread()
+            except Exception:
+                pass
             ollama_body = openai_chat_to_ollama(body)
             resp = await provider.proxy_request("api/chat", ollama_body, stream=is_stream, source="local")
+            if resp.status_code == 404:
+                err = ""
+                try:
+                    await resp.aread()
+                    err = (resp.text or "")[:200]
+                except Exception:
+                    pass
+                logger.warning(
+                    "Local /api/chat 404 model=%r (%s) — falling back to cloud",
+                    model,
+                    err,
+                )
+                cloud_body = dict(body)
+                # Ensure cloud routing even if client omitted -cloud suffix.
+                if not OllamaProvider.is_cloud_model(cloud_body.get("model", "")):
+                    cloud_body["model"] = f"{cloud_body.get('model', '')}{OllamaProvider.CLOUD_SUFFIX}"
+                return await _cloud_chat_openai(
+                    cloud_body, stream=is_stream, model=cloud_body.get("model") or model
+                )
             if is_stream:
                 return StreamingResponse(
                     iter_ollama_chat_as_openai_sse(resp, model=ollama_body.get("model") or model),
@@ -326,6 +353,24 @@ async def proxy(
         resp = await provider.proxy_delete(f"api/{rest}", body, source=source)
     elif method == "POST" and rest.rstrip("/") == "chat" and use_cloud:
         return await _cloud_chat_ollama(body, stream=is_stream)
+    elif method == "POST" and rest.rstrip("/") == "chat" and not use_cloud:
+        logger.info("Local Ollama chat model=%r", model)
+        resp = await provider.proxy_request("api/chat", body, stream=is_stream, source="local")
+        if resp.status_code == 404:
+            err = ""
+            try:
+                await resp.aread()
+                err = (resp.text or "")[:200]
+            except Exception:
+                pass
+            logger.warning("Local /api/chat 404 model=%r (%s) — falling back to cloud", model, err)
+            cloud_body = dict(body)
+            if not OllamaProvider.is_cloud_model(cloud_body.get("model", "")):
+                cloud_body["model"] = f"{cloud_body.get('model', '')}{OllamaProvider.CLOUD_SUFFIX}"
+            return await _cloud_chat_ollama(cloud_body, stream=is_stream)
+        if is_stream:
+            return StreamingResponse(resp.aiter_bytes(), media_type="application/x-ndjson")
+        return await _json_or_empty(resp)
     else:
         resp = await provider.proxy_request(f"api/{rest}", body, stream=is_stream, source=source)
 

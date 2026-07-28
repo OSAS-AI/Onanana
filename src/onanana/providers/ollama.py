@@ -16,6 +16,7 @@ MAX_RETRIES = 3
 
 
 class OllamaProvider:
+    CLOUD_SUFFIX = CLOUD_SUFFIX
     def __init__(
         self,
         local_base_url: str,
