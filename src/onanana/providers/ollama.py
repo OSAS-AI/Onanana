@@ -129,6 +129,13 @@ class OllamaProvider:
             base, token, headers = await self._resolve_cloud_auth()
             if not token:
                 raise RuntimeError("No API key available for cloud endpoint")
+            logger.info(
+                "Cloud POST %s model=%s -> %s key=%s...",
+                path,
+                stripped_model,
+                base,
+                token[:8],
+            )
             resp = await self._send_with_retry(
                 path,
                 base,
@@ -141,6 +148,18 @@ class OllamaProvider:
             )
             if resp.status_code == 429 and token:
                 self._append_to_lock(self._lock_path, token)
+            if resp.status_code >= 400:
+                # Peek error body for logs without consuming stream responses that succeeded.
+                try:
+                    await resp.aread()
+                    logger.warning(
+                        "Cloud POST %s -> %s body=%s",
+                        path,
+                        resp.status_code,
+                        (resp.text or "")[:300],
+                    )
+                except Exception:
+                    logger.warning("Cloud POST %s -> %s", path, resp.status_code)
             return resp
 
         return await self._req_builder.send_request(

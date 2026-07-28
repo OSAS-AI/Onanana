@@ -6,6 +6,33 @@ import uuid
 from typing import Any
 
 
+def ollama_to_openai_chat_request(body: dict[str, Any]) -> dict[str, Any]:
+    """Convert Ollama /api/chat body to OpenAI /v1/chat/completions body."""
+    options = body.get("options") or {}
+    out: dict[str, Any] = {
+        "model": body.get("model", ""),
+        "messages": body.get("messages") or [],
+        "stream": bool(body.get("stream", False)),
+    }
+    for src, dst in (
+        ("temperature", "temperature"),
+        ("top_p", "top_p"),
+        ("seed", "seed"),
+        ("stop", "stop"),
+    ):
+        if body.get(src) is not None:
+            out[dst] = body[src]
+        elif options.get(src) is not None:
+            out[dst] = options[src]
+    if body.get("max_tokens") is not None:
+        out["max_tokens"] = body["max_tokens"]
+    elif options.get("num_predict") is not None:
+        out["max_tokens"] = options["num_predict"]
+    if body.get("tools") is not None:
+        out["tools"] = body["tools"]
+    return out
+
+
 def openai_chat_to_ollama(body: dict[str, Any]) -> dict[str, Any]:
     """Convert OpenAI /v1/chat/completions body to Ollama /api/chat body."""
     options: dict[str, Any] = {}
@@ -23,6 +50,9 @@ def openai_chat_to_ollama(body: dict[str, Any]) -> dict[str, Any]:
         options["seed"] = body["seed"]
     if body.get("stop") is not None:
         options["stop"] = body["stop"]
+    for key in ("top_k", "repeat_penalty"):
+        if body.get(key) is not None:
+            options[key] = body[key]
 
     out: dict[str, Any] = {
         "model": body.get("model", ""),
@@ -74,6 +104,28 @@ def ollama_chat_to_openai(resp: dict[str, Any], *, model: str | None = None) -> 
             "completion_tokens": completion_tokens,
             "total_tokens": prompt_tokens + completion_tokens,
         },
+    }
+
+
+def openai_chat_to_ollama_response(resp: dict[str, Any]) -> dict[str, Any]:
+    """Convert OpenAI chat.completion JSON to Ollama /api/chat JSON."""
+    choice = (resp.get("choices") or [{}])[0]
+    message = choice.get("message") or {"role": "assistant", "content": ""}
+    usage = resp.get("usage") or {}
+    finish = choice.get("finish_reason") or "stop"
+    done_reason = "stop" if finish == "stop" else finish
+    return {
+        "model": resp.get("model") or "",
+        "created_at": "",
+        "message": {
+            "role": message.get("role", "assistant"),
+            "content": message.get("content") or "",
+            **({"tool_calls": message["tool_calls"]} if message.get("tool_calls") else {}),
+        },
+        "done": True,
+        "done_reason": done_reason,
+        "prompt_eval_count": int(usage.get("prompt_tokens") or 0),
+        "eval_count": int(usage.get("completion_tokens") or 0),
     }
 
 

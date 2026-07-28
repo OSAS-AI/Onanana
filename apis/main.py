@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 from contextlib import asynccontextmanager
 
@@ -15,7 +16,9 @@ from src.onanana.keys_manager import KeysManager
 from src.onanana.ollama.openai_compat import (
     iter_ollama_chat_as_openai_sse,
     ollama_chat_to_openai,
+    ollama_to_openai_chat_request,
     openai_chat_to_ollama,
+    openai_chat_to_ollama_response,
 )
 from src.onanana.providers.ollama import OllamaProvider
 
@@ -66,13 +69,107 @@ async def no_key_handler(request: Request, exc: RuntimeError):
 
 
 async def _json_or_empty(resp: httpx.Response) -> Response:
-    await resp.aread()
+    try:
+        await resp.aread()
+    except Exception:
+        pass
     if not resp.content:
         return Response(status_code=resp.status_code)
     try:
         return JSONResponse(content=resp.json(), status_code=resp.status_code)
     except ValueError:
         return Response(content=resp.content, status_code=resp.status_code, media_type=resp.headers.get("content-type"))
+
+
+async def _cloud_chat_openai(body: dict, *, stream: bool, model: str) -> Response:
+    """Cloud chat for OpenAI clients: try /v1 then /api/chat, then retry once more."""
+    ollama_body = openai_chat_to_ollama(body)
+
+    for attempt in range(2):
+        resp = await provider.proxy_request(
+            "v1/chat/completions", body, stream=stream, source="cloud"
+        )
+        if resp.status_code == 200:
+            if stream:
+                return StreamingResponse(resp.aiter_bytes(), media_type="text/event-stream")
+            return await _json_or_empty(resp)
+
+        if resp.status_code == 403:
+            logger.warning("Cloud /v1 403 (attempt %d) — trying /api/chat", attempt + 1)
+            try:
+                await resp.aread()
+            except Exception:
+                pass
+            resp = await provider.proxy_request(
+                "api/chat", ollama_body, stream=stream, source="cloud"
+            )
+            if resp.status_code == 200:
+                if stream:
+                    return StreamingResponse(
+                        iter_ollama_chat_as_openai_sse(resp, model=ollama_body.get("model") or model),
+                        media_type="text/event-stream",
+                    )
+                await resp.aread()
+                return JSONResponse(
+                    content=ollama_chat_to_openai(resp.json(), model=ollama_body.get("model") or model),
+                    status_code=200,
+                )
+
+        # Retry with next key (round-robin advances on each proxy_request).
+        if attempt == 0 and resp.status_code == 403:
+            logger.warning("Cloud chat still 403 — rotating key and retrying")
+            try:
+                await resp.aread()
+            except Exception:
+                pass
+            continue
+        break
+
+    return await _json_or_empty(resp)
+
+
+async def _cloud_chat_ollama(body: dict, *, stream: bool) -> Response:
+    """Cloud chat for native Ollama clients: try /api/chat then /v1."""
+    openai_body = ollama_to_openai_chat_request(body)
+
+    for attempt in range(2):
+        resp = await provider.proxy_request("api/chat", body, stream=stream, source="cloud")
+        if resp.status_code == 200:
+            if stream:
+                return StreamingResponse(resp.aiter_bytes(), media_type="application/x-ndjson")
+            return await _json_or_empty(resp)
+
+        if resp.status_code == 403:
+            logger.warning("Cloud /api/chat 403 (attempt %d) — trying /v1/chat/completions", attempt + 1)
+            try:
+                await resp.aread()
+            except Exception:
+                pass
+            resp = await provider.proxy_request(
+                "v1/chat/completions", openai_body, stream=False, source="cloud"
+            )
+            # Streaming OpenAI->Ollama conversion is lossy; use one-shot JSON for reliability.
+            if stream and resp.status_code == 200:
+                await resp.aread()
+                ollama_resp = openai_chat_to_ollama_response(resp.json())
+                return StreamingResponse(
+                    iter([(json.dumps(ollama_resp, ensure_ascii=False) + "\n").encode()]),
+                    media_type="application/x-ndjson",
+                )
+            if resp.status_code == 200:
+                await resp.aread()
+                return JSONResponse(content=openai_chat_to_ollama_response(resp.json()), status_code=200)
+
+        if attempt == 0 and resp.status_code == 403:
+            logger.warning("Cloud chat still 403 — rotating key and retrying")
+            try:
+                await resp.aread()
+            except Exception:
+                pass
+            continue
+        break
+
+    return await _json_or_empty(resp)
 
 
 @app.get("/api/version")
@@ -123,11 +220,7 @@ async def openai_proxy(
     rest: str,
     source: str = Query(None, pattern="^(local|cloud)$"),
 ):
-    """Proxy OpenAI-compatible endpoints.
-
-    For cloud chat/completions: try /v1 first, fall back to native /api/chat
-    because ollama.com intermittently returns 403 on one path or the other.
-    """
+    """Proxy OpenAI-compatible endpoints with cloud dual-path fallback."""
     km.cleanup_expired_locks()
 
     try:
@@ -145,9 +238,9 @@ async def openai_proxy(
             await resp.aread()
             if resp.status_code != 200:
                 return await _json_or_empty(resp)
-            tags = resp.json() if resp.content else {"models": []}
+            tags_payload = resp.json() if resp.content else {"models": []}
             data = []
-            for m in tags.get("models") or []:
+            for m in tags_payload.get("models") or []:
                 name = m.get("name") or m.get("model") or ""
                 if not name:
                     continue
@@ -163,18 +256,17 @@ async def openai_proxy(
 
     is_stream = bool(body.get("stream", False))
 
-    if use_cloud and rest.rstrip("/") == "chat/completions":
-        # Prefer native OpenAI path; fall back to /api/chat on 403.
-        resp = await provider.proxy_request(
-            "v1/chat/completions", body, stream=is_stream, source="cloud"
-        )
-        if resp.status_code == 403:
-            logger.warning("Cloud /v1/chat/completions returned 403 — falling back to /api/chat")
+    if rest.rstrip("/") == "chat/completions":
+        if use_cloud:
+            return await _cloud_chat_openai(body, stream=is_stream, model=model)
+
+        # Local Ollama may lack /v1 — fall back to /api/chat.
+        resp = await provider.proxy_request("v1/chat/completions", body, stream=is_stream, source="local")
+        if resp.status_code in {404, 405}:
+            logger.warning("Local /v1/chat/completions -> %s — falling back to /api/chat", resp.status_code)
             await resp.aread()
             ollama_body = openai_chat_to_ollama(body)
-            resp = await provider.proxy_request(
-                "api/chat", ollama_body, stream=is_stream, source="cloud"
-            )
+            resp = await provider.proxy_request("api/chat", ollama_body, stream=is_stream, source="local")
             if is_stream:
                 return StreamingResponse(
                     iter_ollama_chat_as_openai_sse(resp, model=ollama_body.get("model") or model),
@@ -183,12 +275,8 @@ async def openai_proxy(
             await resp.aread()
             if resp.status_code != 200:
                 return await _json_or_empty(resp)
-            try:
-                raw = resp.json()
-            except ValueError:
-                return Response(content=resp.content, status_code=resp.status_code)
             return JSONResponse(
-                content=ollama_chat_to_openai(raw, model=ollama_body.get("model") or model),
+                content=ollama_chat_to_openai(resp.json(), model=ollama_body.get("model") or model),
                 status_code=200,
             )
         if is_stream:
@@ -229,11 +317,15 @@ async def proxy(
 
     method = request.method
     is_stream = body.get("stream", False) if method == "POST" else False
+    model = (body or {}).get("model", "") if isinstance(body, dict) else ""
+    use_cloud = source == "cloud" if source else OllamaProvider.is_cloud_model(model)
 
     if method == "GET":
         resp = await provider.proxy_get(f"api/{rest}", source=source or "local")
     elif method == "DELETE":
         resp = await provider.proxy_delete(f"api/{rest}", body, source=source)
+    elif method == "POST" and rest.rstrip("/") == "chat" and use_cloud:
+        return await _cloud_chat_ollama(body, stream=is_stream)
     else:
         resp = await provider.proxy_request(f"api/{rest}", body, stream=is_stream, source=source)
 
