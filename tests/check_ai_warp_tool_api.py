@@ -131,6 +131,35 @@ class TestOpenAICompatEndpoint:
         })
         assert resp.status_code == 200
 
+    def test_chat_completions_cloud_falls_back_on_v1_403(self, test_app, monkeypatch):
+        """When cloud /v1 returns 403, fall back to /api/chat and OpenAI-shape response."""
+        calls = []
+
+        async def fake_proxy_request(path, body, stream=True, *, source=None):
+            calls.append(path)
+            if path.startswith("v1/"):
+                return httpx.Response(403, json={"error": "Forbidden"})
+            return httpx.Response(
+                200,
+                json={
+                    "model": "gemma4:31b",
+                    "message": {"role": "assistant", "content": "hello"},
+                    "done": True,
+                    "prompt_eval_count": 3,
+                    "eval_count": 1,
+                },
+            )
+
+        monkeypatch.setattr("apis.main.provider.proxy_request", fake_proxy_request)
+        resp = test_app.post("/v1/chat/completions", json={
+            "model": "gemma4:31b-cloud",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": False,
+        })
+        assert resp.status_code == 200
+        assert calls == ["v1/chat/completions", "api/chat"]
+        assert resp.json()["choices"][0]["message"]["content"] == "hello"
+
     def test_chat_completions_stream(self, test_app):
         resp = test_app.post("/v1/chat/completions", json={
             "model": "gemma4:26b",

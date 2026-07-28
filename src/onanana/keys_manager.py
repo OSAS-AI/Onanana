@@ -88,27 +88,10 @@ class KeysManager:
         if not self._cloud_base:
             return True
         try:
-            url = f"{self._cloud_base}/api/chat"
-            headers = {
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {key}"
-            }
-            # Query request matching the Ollama chat API structure
-            payload = {
-                "model": "gemma3:4b-cloud",
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": "test"
-                    }
-                ],
-                "stream": False,
-                "options": {
-                    "temperature": 0.7
-                }
-            }
-            r = await self._client.post(url, headers=headers, json=payload)
-            # Consider healthy only if response code is exactly 200
+            # Use /api/tags — cheaper and avoids retired/paid model 403s from chat probes.
+            url = f"{self._cloud_base}/api/tags"
+            headers = {"Authorization": f"Bearer {key}"}
+            r = await self._client.get(url, headers=headers)
             return r.status_code == 200
         except Exception as e:
             logger.debug("Health check failed for key: %s", e)
@@ -185,7 +168,7 @@ if __name__ == "__main__":
             await manager.close()
             return
             
-        logger.info("Checking health of keys via Ollama chat API (gemma3:4b-cloud)...")
+        logger.info("Checking health of keys via Ollama /api/tags...")
         healthy_keys = await manager.refresh_healthy_keys()
         
         if healthy_keys:
