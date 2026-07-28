@@ -98,6 +98,29 @@ class OllamaProvider:
             return self._cloud_base, token, {"Authorization": f"Bearer {token}"}
         raise RuntimeError("No API key available for cloud endpoint. Add keys to secrets/keys.txt or set WARP_CLOUD_API_KEY.")
 
+    async def _send_with_key_rotation(
+        self, path: str, base: str, body: dict[str, Any] | None, *,
+        model_override: str | None = None, stream: bool = True,
+    ) -> httpx.Response:
+        last_resp: httpx.Response | None = None
+        for _ in range(len(self._keys_manager._healthy_keys) + 1):
+            _, token, auth_headers = await self._resolve_cloud_auth()
+            if not token:
+                break
+            resp = await self._send_with_retry(
+                path, base, body,
+                model_override=model_override, headers=auth_headers,
+                stream=stream, token=token,
+            )
+            if resp.status_code in LOCKABLE_STATUS_CODES:
+                self._append_to_lock(self._lock_path, token)
+                last_resp = resp
+                continue
+            return resp
+        if last_resp is not None:
+            return last_resp
+        raise RuntimeError("No API key available for cloud endpoint")
+
     async def _get_backend_url(self, model: str) -> tuple[str, str]:
         stripped = self.strip_cloud_suffix(model)
         if self.is_cloud_model(model):
@@ -113,17 +136,10 @@ class OllamaProvider:
         use_cloud = source == "cloud" if source else self.is_cloud_model(model)
 
         if use_cloud:
-            base, token, headers = await self._resolve_cloud_auth()
-            if not token:
-                raise RuntimeError("No API key available for cloud endpoint")
-            resp = await self._send_with_retry(
-                path, base, json_body,
-                model_override=stripped_model, headers=headers,
-                stream=stream, token=token,
+            return await self._send_with_key_rotation(
+                path, self._cloud_base, json_body,
+                model_override=stripped_model, stream=stream,
             )
-            if resp.status_code in LOCKABLE_STATUS_CODES and token:
-                self._append_to_lock(self._lock_path, token)
-            return resp
 
         return await self._req_builder.send_request(
             path,
@@ -138,18 +154,10 @@ class OllamaProvider:
 
     async def proxy_get(self, path: str, *, source: str = "local") -> httpx.Response:
         if source == "cloud":
-            base, token, headers = await self._resolve_cloud_auth()
-            if not token:
-                raise RuntimeError("No API key available for cloud endpoint")
-            url = f"{base}/{path.lstrip('/')}"
-            logger.debug("Proxying cloud GET %s -> %s", path, url)
-            resp = await self._send_with_retry(
-                path, base, None,
-                headers=headers, stream=False, token=token,
+            logger.debug("Proxying cloud GET %s", path)
+            return await self._send_with_key_rotation(
+                path, self._cloud_base, None, stream=False,
             )
-            if resp.status_code in LOCKABLE_STATUS_CODES and token:
-                self._append_to_lock(self._lock_path, token)
-            return resp
         url = f"{self._local_base}/{path.lstrip('/')}"
         logger.debug("Proxying local GET %s -> %s", path, url)
         return await self._client.get(url)
@@ -162,17 +170,10 @@ class OllamaProvider:
         use_cloud = source == "cloud" if source else self.is_cloud_model(model)
 
         if use_cloud:
-            base, token, headers = await self._resolve_cloud_auth()
-            if not token:
-                raise RuntimeError("No API key available for cloud endpoint")
-            resp = await self._send_with_retry(
-                path, base, json_body,
-                model_override=stripped_model, headers=headers,
-                stream=False, token=token,
+            return await self._send_with_key_rotation(
+                path, self._cloud_base, json_body,
+                model_override=stripped_model, stream=False,
             )
-            if resp.status_code in LOCKABLE_STATUS_CODES and token:
-                self._append_to_lock(self._lock_path, token)
-            return resp
 
         return await self._req_builder.send_request(
             path,
