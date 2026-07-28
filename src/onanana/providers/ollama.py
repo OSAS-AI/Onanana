@@ -5,6 +5,7 @@ from typing import Any
 
 import httpx
 
+from src.onanana.config import settings
 from src.onanana.keys_manager import KeysManager, LOCK_SEPARATOR
 from src.onanana.ollama.request import OllamaRequestBuilder
 
@@ -12,6 +13,7 @@ logger = logging.getLogger(__name__)
 
 CLOUD_SUFFIX = "-cloud"
 MAX_RETRIES = 3
+LOCKABLE_STATUS_CODES = set(settings.ollama_cloud_errors.keys())
 
 
 class OllamaProvider:
@@ -119,7 +121,7 @@ class OllamaProvider:
                 model_override=stripped_model, headers=headers,
                 stream=stream, token=token,
             )
-            if resp.status_code == 429 and token:
+            if resp.status_code in LOCKABLE_STATUS_CODES and token:
                 self._append_to_lock(self._lock_path, token)
             return resp
 
@@ -145,7 +147,7 @@ class OllamaProvider:
                 path, base, None,
                 headers=headers, stream=False, token=token,
             )
-            if resp.status_code == 429 and token:
+            if resp.status_code in LOCKABLE_STATUS_CODES and token:
                 self._append_to_lock(self._lock_path, token)
             return resp
         url = f"{self._local_base}/{path.lstrip('/')}"
@@ -168,7 +170,7 @@ class OllamaProvider:
                 model_override=stripped_model, headers=headers,
                 stream=False, token=token,
             )
-            if resp.status_code == 429 and token:
+            if resp.status_code in LOCKABLE_STATUS_CODES and token:
                 self._append_to_lock(self._lock_path, token)
             return resp
 

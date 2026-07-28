@@ -8,16 +8,20 @@ from fastapi import FastAPI, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 import sys
 from pathlib import Path
-sys.path.append(str(Path(__file__).parents[1]))
+sys.path.append(str(Path(__file__).parents[2]))
 
 from src.onanana.config import settings
 from src.onanana.keys_manager import KeysManager
+from src.onanana.openai import convert_ndjson_to_sse, to_openai_completion
 from src.onanana.providers.ollama import OllamaProvider
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 CLEANUP_INTERVAL = 600  # 10 minutes
+
+request_counter = 0
+rest_request_counter = 0
 
 km = KeysManager(settings.keys_file_path, cloud_base_url=settings.cloud_ollama_base_url,
                  lock_path=settings.lock_file_path)
@@ -53,6 +57,15 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="AI Warp Tool", lifespan=lifespan)
 
 
+@app.middleware("http")
+async def count_requests(request: Request, call_next):
+    global request_counter
+    request_counter += 1
+    response = await call_next(request)
+    logger.info("Total requests: %d", request_counter)
+    return response
+
+
 @app.exception_handler(RuntimeError)
 async def no_key_handler(request: Request, exc: RuntimeError):
     if "No API key available" in str(exc):
@@ -86,6 +99,8 @@ async def proxy(
     prompt: str = Query(None),
     system: str = Query(None),
 ):
+    global rest_request_counter
+    rest_request_counter += 1
     km.cleanup_expired_locks()
 
     try:
@@ -105,17 +120,53 @@ async def proxy(
     method = request.method
     is_stream = body.get("stream", False) if method == "POST" else False
 
-    if method == "GET":
-        resp = await provider.proxy_get(f"api/{rest}", source=source or "local")
-    elif method == "DELETE":
-        resp = await provider.proxy_delete(f"api/{rest}", body, source=source)
-    else:
-        resp = await provider.proxy_request(f"api/{rest}", body, stream=is_stream, source=source)
+    try:
+        if method == "GET":
+            resp = await provider.proxy_get(f"api/{rest}", source=source or "local")
+        elif method == "DELETE":
+            resp = await provider.proxy_delete(f"api/{rest}", body, source=source)
+        else:
+            resp = await provider.proxy_request(f"api/{rest}", body, stream=is_stream, source=source)
 
-    if is_stream:
-        return StreamingResponse(resp.aiter_bytes(), media_type="application/x-ndjson")
+        if is_stream:
+            return StreamingResponse(resp.aiter_bytes(), media_type="application/x-ndjson")
+        await resp.aread()
+        return JSONResponse(content=resp.json(), status_code=resp.status_code)
+    finally:
+        rest_request_counter -= 1
+        if rest_request_counter == 0:
+            logger.info("All requests processed")
+
+
+@app.post("/v1/chat/completions")
+async def chat_completions(
+    request: Request,
+    source: str = Query(None, pattern="^(local|cloud)$"),
+):
+    body = await request.json()
+    model = body.get("model", "")
+    messages = body.get("messages", [])
+    stream = body.get("stream", False)
+
+    ollama_body = {
+        "model": model,
+        "messages": messages,
+        "stream": stream,
+    }
+
+    resp = await provider.proxy_request("api/chat", ollama_body, stream=stream, source=source)
+
+    if stream:
+        return StreamingResponse(
+            convert_ndjson_to_sse(resp.aiter_bytes(), model),
+            media_type="text/event-stream",
+        )
+
     await resp.aread()
-    return JSONResponse(content=resp.json(), status_code=resp.status_code)
+    return JSONResponse(
+        content=to_openai_completion(resp.json(), model),
+        status_code=resp.status_code,
+    )
 
 
 if __name__ == "__main__":
