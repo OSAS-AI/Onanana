@@ -5,6 +5,23 @@ ollama_cloud_errors:
   403:
     description: "Forbidden - access denied, key may be invalid or revoked"
     action: lock_key
+  
+  500:
+    description: "Internal Server Error - temporary server failure"
+    action: lock_key
+
+  502:
+    description: "Internal Server Error - temporary server failure"
+    action: lock_key
+
+  503:
+    description: "Internal Server Error - temporary server failure"
+    action: lock_key
+  
+  504:
+    description: "Internal Server Error - temporary server failure"
+    action: lock_key
+    
   524:
     description: "A timeout occurred - origin server did not respond in time"
     action: lock_key
