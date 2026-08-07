@@ -12,7 +12,7 @@ from src.onanana.ollama.request import OllamaRequestBuilder
 logger = logging.getLogger(__name__)
 
 CLOUD_SUFFIX = "-cloud"
-MAX_RETRIES = 3
+MAX_RETRIES = 15
 LOCKABLE_STATUS_CODES = set(settings.ollama_cloud_errors.keys())
 
 
